@@ -1,0 +1,10 @@
+--find-links https://download.pytorch.org/whl/cpu
+torch
+sentence-transformers==3.0.1
+newspaper4k==0.9.3
+feedparser==6.0.12
+google-genai
+supabase
+python-dotenv==1.2.2
+pydantic>=2.11.7
+lxml_html_clean

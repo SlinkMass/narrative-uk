@@ -1,0 +1,45 @@
+RSS_FEEDS = {
+    "bbc": "https://feeds.bbci.co.uk/news/rss.xml",
+    "guardian": "https://www.theguardian.com/uk/rss",
+    "sky": "https://feeds.skynews.com/feeds/rss/uk.xml",
+    "independent": "https://www.independent.co.uk/news/uk/rss",
+    "metro": "https://metro.co.uk/news/uk/feed/",
+    "standard": "https://www.standard.co.uk/news/uk/rss",
+    "mirror": "https://www.mirror.co.uk/news/uk-news/rss.xml",
+    "telegraph": "https://www.telegraph.co.uk/news/rss.xml",
+    "times": "https://www.times-series.co.uk/news/rss/",
+    "dailymail": "https://www.dailymail.co.uk/news/index.rss",
+    "gbnews": "https://www.gbnews.com/feeds/news.rss",
+    "morningstar": "https://morningstaronline.co.uk/rss.xml",
+    "novaramedia":"https://novaramedia.com/feed/",
+    "thei":"https://inews.co.uk/feed",
+    "spectator": "https://www.spectator.co.uk/feed/",
+    "unherd": "https://unherd.com/feed/",
+    "neweuropean": "https://www.theneweuropean.co.uk/feed/",
+}
+
+SOURCE_BIAS = {
+    # UK
+    "bbc": -0.05,
+    "guardian": -0.45,
+    "independent": -0.3,
+    "telegraph": 0.5,
+    "times": 0.35,
+    "metro": 0.05,
+    "standard": 0.4,
+    "sky": 0.05,
+    "dailymail": 0.85,
+    "gbnews": 0.95,
+    "mirror": -0.55,
+    "reuters": 0.0,
+    "ap": 0.0,
+    "morningstar": -1.25,
+    "novaramedia": -1,
+    "neweuropean": -0.4,
+    "thei": 0.05,
+    "spectator": 0.7,
+    "unherd": 0.4,
+    "infowars" : 1.45,
+}
+
+CLUSTER_TIME_WINDOW_HOURS = 48
