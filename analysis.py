@@ -105,6 +105,7 @@ def get_ai_insight(headline, body, source_name):
 def run_analysis():
     print("--- STARTING DB-DRIVEN AUDIT ---")
     
+    # 1. Fetch only what needs work
     response = supabase.table("articles") \
         .select("*") \
         .eq("insight", "AI analysis queued...") \
@@ -119,6 +120,10 @@ def run_analysis():
     print(f"Found {len(pending_articles)} articles to analyze.")
 
     for article in pending_articles:
+        # --- RATE LIMIT PROTECTION ---
+        # 5 seconds ensures you never exceed 12 requests per minute (Free limit is 15)
+        time.sleep(5) 
+        
         a_id = article['id']
         source = article['source']
         headline = article['headline']
@@ -130,12 +135,18 @@ def run_analysis():
         
         # --- RETRY LOGIC START ---
         analysis = None
-        for attempt in range(2):  # Try twice
+        max_retries = 3
+        
+        for attempt in range(max_retries):
             analysis = get_ai_insight(headline, input_text, source)
+            
             if analysis:
-                break
-            print(f"  [Retry] Attempt {attempt + 1} failed for {a_id}. Retrying...")
-            time.sleep(2) # Short breather between retries
+                break # Success!
+                
+            # If we reach here, the call failed (likely a 429, 503, or bad JSON)
+            wait_time = (attempt + 1) * 10 + random.uniform(1, 5) 
+            print(f"  [Retry {attempt + 1}/{max_retries}] Failed. Waiting {wait_time:.1f}s...")
+            time.sleep(wait_time)
 
         if analysis:
             try:
@@ -144,16 +155,12 @@ def run_analysis():
             except Exception as e:
                 print(f"  [DB Update Error] Failed to update {a_id}: {e}")
         else:
-            # --- PURGE LOGIC ---
-            print(f"  [Critical Failure] Could not parse JSON for {a_id} after 2 tries. PURGING.")
-            try:
-                supabase.table("articles").delete().eq("id", a_id).execute()
-                print(f"  [Deleted] Removed broken article from DB.")
-            except Exception as e:
-                print(f"  [DB Delete Error] Failed to purge {a_id}: {e}")
-        # --- RETRY LOGIC END ---
-        
-        time.sleep(1) 
+            # --- SOFT FAIL LOGIC ---
+            # We NO LONGER delete. We leave it in the DB.
+            # If it failed because of rate limits, the next 30-min run will try again.
+            print(f"  [Skipped] Could not get analysis for {a_id} after {max_retries} tries. It will remain 'Queued'.")
+
+    print("--- AUDIT RUN FINISHED ---")
 
 if __name__ == "__main__":
     run_analysis()
