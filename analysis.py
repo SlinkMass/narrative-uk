@@ -9,6 +9,7 @@ from google.genai import types
 from newspaper import Article as Scraper
 from newspaper import Config
 from supabase import create_client, Client
+import random
 
 # Import the baseline bias dictionary from your config file
 from config import SOURCE_BIAS
