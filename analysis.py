@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from newspaper import Article as Scraper
+from newspaper import Config
 from supabase import create_client, Client
 
 # Import the baseline bias dictionary from your config file
@@ -24,12 +25,12 @@ os.environ["GOOGLE_API_KEY"] = os.getenv("GEMINI_KEY")
 os.environ["GOOGLE_CLOUD_PROJECT"] = os.getenv("GOOGLE_CLOUD_PROJECT")
 os.environ["GOOGLE_CLOUD_LOCATION"] = "us-central1" 
 
+config = Config()
+config.user_agent = 'NarrativeUK-Bot/1.0 (+https://narrativeuk.co.uk/about)'
+config.request_timeout = 10
+
 # Initialize the client for Vertex AI
-client = genai.Client(
-    vertexai=True,
-    project=os.environ["GOOGLE_CLOUD_PROJECT"],
-    location=os.environ["GOOGLE_CLOUD_LOCATION"]
-)
+client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
 
 def get_body_content(url):
     """Scrapes the full body of the article."""
