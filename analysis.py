@@ -85,7 +85,7 @@ def get_ai_insight(headline, body, source_name):
 
     try:
         response = client.models.generate_content(
-            model="gemini-flash-latest", 
+            model="gemini-3.1-flash-lite-preview", 
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 tools=[google_search_tool],
