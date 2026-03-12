@@ -23,7 +23,6 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 os.environ["GOOGLE_API_KEY"] = os.getenv("GEMINI_KEY")
-os.environ["GOOGLE_CLOUD_PROJECT"] = os.getenv("GOOGLE_CLOUD_PROJECT")
 os.environ["GOOGLE_CLOUD_LOCATION"] = "us-central1" 
 
 config = Config()
