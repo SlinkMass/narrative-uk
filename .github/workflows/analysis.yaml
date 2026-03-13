@@ -23,12 +23,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Pipeline
+      - name: Run Scraper & Trigger
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY}}
-
-        run: python pipeline.py
+          # Note: GEMINI_KEY is no longer needed here!
+        run: python news.py

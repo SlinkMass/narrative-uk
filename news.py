@@ -70,6 +70,9 @@ def build_smart_stories(articles: List[Article]) -> List[Story]:
 def push_and_clean_db(stories: List[Story]):
     current_story_ids = [s.story_id for s in stories]
     
+    # NEW LOGIC: Clear staging at the start of each run to prevent stale clusters
+    supabase.table("articles_staging").delete().neq("id", "0").execute()
+    
     for story in stories:
         supabase.table("stories").upsert({
             "story_id": story.story_id,
@@ -78,7 +81,9 @@ def push_and_clean_db(stories: List[Story]):
         }).execute()
 
         for a in story.articles:
-            existing = supabase.table("articles").select("insight").eq("id", a.id).execute()
+            # Check if article is already in the LIVE audited table
+            existing_live = supabase.table("articles").select("id").eq("id", a.id).execute()
+            
             payload = {
                 "id": a.id,
                 "story_id": story.story_id,
@@ -89,11 +94,13 @@ def push_and_clean_db(stories: List[Story]):
                 "published_at": a.published_at.isoformat(),
                 "bias_score": a.bias_score
             }
-            if not existing.data:
-                payload["insight"] = "AI analysis queued..."
-                supabase.table("articles").insert(payload).execute()
+            
+            if not existing_live.data:
+                # OPTION 1: Only push to staging if it hasn't been audited yet
+                supabase.table("articles_staging").insert(payload).execute()
             else:
-                supabase.table("articles").update(payload).eq("id", a.id).execute()
+                # If it's already live, just update the story_id mapping in case clustering changed
+                supabase.table("articles").update({"story_id": story.story_id}).eq("id", a.id).execute()
 
     if current_story_ids:
         supabase.table("stories").delete().not_.in_("story_id", current_story_ids).execute()
@@ -116,3 +123,6 @@ def get_stories(force_refresh: bool = False):
             ))
     stories = build_smart_stories(raw_articles)
     push_and_clean_db(stories)
+
+if __name__ == "__main__":
+    get_stories()
