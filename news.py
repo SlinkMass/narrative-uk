@@ -108,19 +108,35 @@ def push_and_clean_db(stories: List[Story]):
 def get_stories(force_refresh: bool = False):
     raw_articles = []
     for source_id, feed_url in RSS_FEEDS.items():
-        feed = feedparser.parse(feed_url)
-        for entry in feed.entries[:ARTICLE_CAP]:
-            published = getattr(entry, "published_parsed", None)
-            dt = datetime(*published[:6], tzinfo=timezone.utc) if published else datetime.now(timezone.utc)
-            raw_articles.append(Article(
-                id=generate_article_id(entry.link),
-                source=source_id,
-                headline=getattr(entry, "title", ""),
-                summary=getattr(entry, "summary", ""),
-                url=getattr(entry, "link", ""),
-                published_at=dt,
-                bias_score=SOURCE_BIAS.get(source_id, 0.0)
-            ))
+        try:
+            # Added a 15-second timeout to prevent hanging
+            feed = feedparser.parse(feed_url)
+            
+            # Check if the feed failed to load (bozo is feedparser's error flag)
+            if feed.bozo:
+                print(f"  [Feed Warning] Potential issue with {source_id}: {feed.bozo_exception}")
+
+            for entry in feed.entries[:ARTICLE_CAP]:
+                published = getattr(entry, "published_parsed", None)
+                dt = datetime(*published[:6], tzinfo=timezone.utc) if published else datetime.now(timezone.utc)
+                raw_articles.append(Article(
+                    id=generate_article_id(entry.link),
+                    source=source_id,
+                    headline=getattr(entry, "title", ""),
+                    summary=getattr(entry, "summary", ""),
+                    url=getattr(entry, "link", ""),
+                    published_at=dt,
+                    bias_score=SOURCE_BIAS.get(source_id, 0.0)
+                ))
+        except Exception as e:
+            # This catches the RemoteDisconnected error and keeps the script moving
+            print(f"  [Feed Error] Skipped {source_id} due to connection error: {e}")
+            continue 
+
+    if not raw_articles:
+        print("No articles fetched from any source. Exiting.")
+        return
+
     stories = build_smart_stories(raw_articles)
     push_and_clean_db(stories)
 
