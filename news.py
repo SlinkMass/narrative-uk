@@ -68,11 +68,18 @@ def build_smart_stories(articles: List[Article]) -> List[Story]:
     return [s for s in unique_stories if len(s.articles) >= 3]
 
 def push_and_clean_db(stories: List[Story]):
+    
     current_story_ids = [s.story_id for s in stories]
     
-    # NEW LOGIC: Clear staging at the start of each run to prevent stale clusters
-    supabase.table("articles_staging").delete().neq("id", "0").execute()
-    
+    if not stories:
+        print("No stories clustered. Skipping DB push.")
+        return
+
+    try:
+        supabase.table("articles_staging").delete().neq("id", "0").execute()
+    except Exception as e:
+        print(f"  [DB Warning] Could not clear staging: {e}")
+
     for story in stories:
         supabase.table("stories").upsert({
             "story_id": story.story_id,
@@ -81,7 +88,7 @@ def push_and_clean_db(stories: List[Story]):
         }).execute()
 
         for a in story.articles:
-            # Check if article is already in the LIVE audited table
+            # Check if this article is already in the LIVE 'articles' table
             existing_live = supabase.table("articles").select("id").eq("id", a.id).execute()
             
             payload = {
@@ -96,14 +103,16 @@ def push_and_clean_db(stories: List[Story]):
             }
             
             if not existing_live.data:
-                # OPTION 1: Only push to staging if it hasn't been audited yet
-                supabase.table("articles_staging").insert(payload).execute()
+                # Push to staging for the AI Auditor to find
+                supabase.table("articles_staging").upsert(payload).execute()
             else:
-                # If it's already live, just update the story_id mapping in case clustering changed
+                # Update existing live article to point to the new story_id (clustering change)
                 supabase.table("articles").update({"story_id": story.story_id}).eq("id", a.id).execute()
 
     if current_story_ids:
         supabase.table("stories").delete().not_.in_("story_id", current_story_ids).execute()
+    
+    print(f"--- DB SYNC COMPLETE: {len(stories)} stories processed ---")
 
 def get_stories(force_refresh: bool = False):
     raw_articles = []
