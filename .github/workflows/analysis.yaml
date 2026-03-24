@@ -23,9 +23,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Scraper & Trigger
+      - name: Run Scraper & Grouping
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          # Note: GEMINI_KEY is no longer needed here!
         run: python news.py
+
+      - name: Trigger Cloud AI Audit
+        run: |
+          echo "Triggering Vertex AI Audit for new articles..."
+          curl -X POST "https://us-central1-narrativeuk.cloudfunctions.net/narrative-uk-brain" \
+          -H "Content-Type: application/json" \
+          -d '{}'
