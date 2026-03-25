@@ -65,74 +65,71 @@ def build_smart_stories(articles: List[Article]) -> List[Story]:
             new_story._seed_idx = i
             unique_stories.append(new_story)
 
-    return [s for s in unique_stories if len(s.articles) >= 3]
+    # We return ALL stories now to ensure the Parent ID exists in the DB.
+    # We will filter which ones get audited (3+) in the push logic below.
+    return unique_stories
 
 def push_and_clean_db(stories: List[Story]):
     if not stories:
         print("No stories clustered. Skipping DB push.")
         return
 
-    # 1. UPSERT STORIES FIRST (The Parents)
+    # 1. Clear staging to prevent "ghost" articles from previous runs
+    try:
+        supabase.table("articles_staging").delete().neq("id", "0").execute()
+    except Exception as e:
+        print(f"  [DB Warning] Could not clear staging: {e}")
+
     for story in stories:
+        # 2. UPSERT THE PARENT STORY FIRST
+        # This guarantees the Foreign Key exists before we touch articles.
         supabase.table("stories").upsert({
             "story_id": story.story_id,
             "topic": story.topic,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }).execute()
 
-    # 2. CLEAR STAGING (Fresh start for the Brain)
-    try:
-        supabase.table("articles_staging").delete().neq("id", "0").execute()
-    except Exception as e:
-        print(f"  [DB Warning] Could not clear staging: {e}")
-
-    # 3. PROCESS ARTICLES
-    for story in stories:
-        for a in story.articles:
-            # Check if this article is already in the LIVE 'articles' table
-            existing_live = supabase.table("articles").select("id").eq("id", a.id).execute()
-            
-            payload = {
-                "id": a.id,
-                "story_id": story.story_id,
-                "source": a.source,
-                "headline": a.headline,
-                "summary": a.summary,
-                "url": a.url,
-                "published_at": a.published_at.isoformat(),
-                "bias_score": a.bias_score
-            }
-            
-            if not existing_live.data:
-                # Article is new: push to staging for auditing
-                supabase.table("articles_staging").upsert(payload).execute()
-            else:
-                # Article is live: update its story_id mapping
-                # This keeps the Foreign Key relationship alive even if clustering shifts
-                supabase.table("articles").update({"story_id": story.story_id}).eq("id", a.id).execute()
+        # 3. Only "Stage" articles for AI Auditing if the cluster is significant (>= 3)
+        # This keeps the UI clean while keeping the DB happy.
+        if len(story.articles) >= 3:
+            for a in story.articles:
+                # Check if this article is already in the LIVE 'articles' table
+                existing_live = supabase.table("articles").select("id").eq("id", a.id).execute()
+                
+                payload = {
+                    "id": a.id,
+                    "story_id": story.story_id,
+                    "source": a.source,
+                    "headline": a.headline,
+                    "summary": a.summary,
+                    "url": a.url,
+                    "published_at": a.published_at.isoformat(),
+                    "bias_score": a.bias_score
+                }
+                
+                if not existing_live.data:
+                    # New article: push to staging for the Brain to audit
+                    supabase.table("articles_staging").upsert(payload).execute()
+                else:
+                    # Existing article: update the story_id mapping (clustering might have shifted)
+                    supabase.table("articles").update({"story_id": story.story_id}).eq("id", a.id).execute()
 
     # 4. SMART CLEANUP
-    # Instead of deleting by ID list, we use a RPC (Stored Procedure) 
-    # to only kill stories that are actually empty/orphaned.
+    # Only delete stories that have NO articles in live OR staging.
     try:
         supabase.rpc('delete_orphaned_stories').execute()
     except Exception as e:
-        # Fallback if you haven't added the RPC yet: 
-        # Just skip deletion to prevent the FK error you're seeing.
-        print(f"  [DB Warning] Cleanup skipped. Ensure RPC 'delete_orphaned_stories' is created: {e}")
+        print(f"  [DB Warning] Smart cleanup failed. Ensure RPC is created in Supabase: {e}")
     
-    print(f"--- DB SYNC COMPLETE: {len(stories)} stories processed ---")
-    
+    print(f"--- DB SYNC COMPLETE: {len(stories)} clusters processed ---")
+
 def get_stories(force_refresh: bool = False):
     raw_articles = []
     for source_id, feed_url in RSS_FEEDS.items():
         try:
-            # Added a 15-second timeout to prevent hanging
             feed = feedparser.parse(feed_url)
-            
-            # Check if the feed failed to load (bozo is feedparser's error flag)
             if feed.bozo:
-                print(f"  [Feed Warning] Potential issue with {source_id}: {feed.bozo_exception}")
+                print(f"  [Feed Warning] Issue with {source_id}: {feed.bozo_exception}")
 
             for entry in feed.entries[:ARTICLE_CAP]:
                 published = getattr(entry, "published_parsed", None)
@@ -147,12 +144,11 @@ def get_stories(force_refresh: bool = False):
                     bias_score=SOURCE_BIAS.get(source_id, 0.0)
                 ))
         except Exception as e:
-            # This catches the RemoteDisconnected error and keeps the script moving
-            print(f"  [Feed Error] Skipped {source_id} due to connection error: {e}")
+            print(f"  [Feed Error] Skipped {source_id}: {e}")
             continue 
 
     if not raw_articles:
-        print("No articles fetched from any source. Exiting.")
+        print("No articles fetched. Exiting.")
         return
 
     stories = build_smart_stories(raw_articles)
