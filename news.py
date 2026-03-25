@@ -68,18 +68,11 @@ def build_smart_stories(articles: List[Article]) -> List[Story]:
     return [s for s in unique_stories if len(s.articles) >= 3]
 
 def push_and_clean_db(stories: List[Story]):
-    
-    current_story_ids = [s.story_id for s in stories]
-    
     if not stories:
         print("No stories clustered. Skipping DB push.")
         return
 
-    try:
-        supabase.table("articles_staging").delete().neq("id", "0").execute()
-    except Exception as e:
-        print(f"  [DB Warning] Could not clear staging: {e}")
-
+    # 1. UPSERT STORIES FIRST (The Parents)
     for story in stories:
         supabase.table("stories").upsert({
             "story_id": story.story_id,
@@ -87,6 +80,14 @@ def push_and_clean_db(stories: List[Story]):
             "updated_at": datetime.now(timezone.utc).isoformat()
         }).execute()
 
+    # 2. CLEAR STAGING (Fresh start for the Brain)
+    try:
+        supabase.table("articles_staging").delete().neq("id", "0").execute()
+    except Exception as e:
+        print(f"  [DB Warning] Could not clear staging: {e}")
+
+    # 3. PROCESS ARTICLES
+    for story in stories:
         for a in story.articles:
             # Check if this article is already in the LIVE 'articles' table
             existing_live = supabase.table("articles").select("id").eq("id", a.id).execute()
@@ -103,17 +104,25 @@ def push_and_clean_db(stories: List[Story]):
             }
             
             if not existing_live.data:
-                # Push to staging for the AI Auditor to find
+                # Article is new: push to staging for auditing
                 supabase.table("articles_staging").upsert(payload).execute()
             else:
-                # Update existing live article to point to the new story_id (clustering change)
+                # Article is live: update its story_id mapping
+                # This keeps the Foreign Key relationship alive even if clustering shifts
                 supabase.table("articles").update({"story_id": story.story_id}).eq("id", a.id).execute()
 
-    if current_story_ids:
-        supabase.table("stories").delete().not_.in_("story_id", current_story_ids).execute()
+    # 4. SMART CLEANUP
+    # Instead of deleting by ID list, we use a RPC (Stored Procedure) 
+    # to only kill stories that are actually empty/orphaned.
+    try:
+        supabase.rpc('delete_orphaned_stories').execute()
+    except Exception as e:
+        # Fallback if you haven't added the RPC yet: 
+        # Just skip deletion to prevent the FK error you're seeing.
+        print(f"  [DB Warning] Cleanup skipped. Ensure RPC 'delete_orphaned_stories' is created: {e}")
     
     print(f"--- DB SYNC COMPLETE: {len(stories)} stories processed ---")
-
+    
 def get_stories(force_refresh: bool = False):
     raw_articles = []
     for source_id, feed_url in RSS_FEEDS.items():
