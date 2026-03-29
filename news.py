@@ -3,6 +3,7 @@ import feedparser
 from datetime import datetime, timezone
 from typing import List
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 
 from newspaper import Article as Scraper
 from newspaper import Config
@@ -27,7 +28,9 @@ SIMILARITY_THRESHOLD = 0.55
 ARTICLE_CAP = 40 
 
 def generate_article_id(url: str) -> str:
-    return hashlib.sha256(url.encode('utf-8')).hexdigest()[:12]
+    # URL Normalization: Strip query parameters to prevent duplicate IDs for the same article
+    clean_url = urlparse(url)._replace(query="").geturl()
+    return hashlib.sha256(clean_url.encode('utf-8')).hexdigest()[:12]
 
 def get_full_content(article_obj: Article) -> str:
     try:
@@ -41,19 +44,28 @@ def get_full_content(article_obj: Article) -> str:
 def build_smart_stories(articles: List[Article]) -> List[Story]:
     if not articles: return []
     
+    # Pre-deduplicate raw articles by ID to ensure we don't process the same link twice
+    seen_ids = set()
+    unique_raw_articles = []
+    for a in articles:
+        if a.id not in seen_ids:
+            unique_raw_articles.append(a)
+            seen_ids.add(a.id)
+
     with ThreadPoolExecutor(max_workers=10) as executor:
-        all_texts = list(executor.map(get_full_content, articles))
+        all_texts = list(executor.map(get_full_content, unique_raw_articles))
 
     all_embeddings = model.encode(all_texts, convert_to_tensor=True)
     unique_stories = []
     
-    for i, article in enumerate(articles):
+    for i, article in enumerate(unique_raw_articles):
         matched = False
         article_emb = all_embeddings[i]
 
         for story in unique_stories:
             score = util.cos_sim(article_emb, all_embeddings[story._seed_idx])
             if score > SIMILARITY_THRESHOLD:
+                # FIX: Strictly allow only ONE article per source per story cluster
                 if not any(existing.source == article.source for existing in story.articles):
                     story.articles.append(article)
                 matched = True
@@ -65,8 +77,6 @@ def build_smart_stories(articles: List[Article]) -> List[Story]:
             new_story._seed_idx = i
             unique_stories.append(new_story)
 
-    # We return ALL stories now to ensure the Parent ID exists in the DB.
-    # We will filter which ones get audited (3+) in the push logic below.
     return unique_stories
 
 def push_and_clean_db(stories: List[Story]):
@@ -82,7 +92,6 @@ def push_and_clean_db(stories: List[Story]):
 
     for story in stories:
         # 2. UPSERT THE PARENT STORY FIRST
-        # This guarantees the Foreign Key exists before we touch articles.
         supabase.table("stories").upsert({
             "story_id": story.story_id,
             "topic": story.topic,
@@ -90,7 +99,6 @@ def push_and_clean_db(stories: List[Story]):
         }).execute()
 
         # 3. Only "Stage" articles for AI Auditing if the cluster is significant (>= 3)
-        # This keeps the UI clean while keeping the DB happy.
         if len(story.articles) >= 3:
             for a in story.articles:
                 # Check if this article is already in the LIVE 'articles' table
@@ -111,15 +119,14 @@ def push_and_clean_db(stories: List[Story]):
                     # New article: push to staging for the Brain to audit
                     supabase.table("articles_staging").upsert(payload).execute()
                 else:
-                    # Existing article: update the story_id mapping (clustering might have shifted)
+                    # Existing article: update the story_id mapping
                     supabase.table("articles").update({"story_id": story.story_id}).eq("id", a.id).execute()
 
     # 4. SMART CLEANUP
-    # Only delete stories that have NO articles in live OR staging.
     try:
         supabase.rpc('delete_orphaned_stories').execute()
     except Exception as e:
-        print(f"  [DB Warning] Smart cleanup failed. Ensure RPC is created in Supabase: {e}")
+        print(f"  [DB Warning] Smart cleanup failed: {e}")
     
     print(f"--- DB SYNC COMPLETE: {len(stories)} clusters processed ---")
 
