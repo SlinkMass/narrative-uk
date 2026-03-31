@@ -91,15 +91,14 @@ def push_and_clean_db(stories: List[Story]):
         print(f"  [DB Warning] Could not clear staging: {e}")
 
     for story in stories:
-        # 2. UPSERT THE PARENT STORY FIRST
-        supabase.table("stories").upsert({
-            "story_id": story.story_id,
-            "topic": story.topic,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }).execute()
-
-        # 3. Only "Stage" articles for AI Auditing if the cluster is significant (>= 3)
         if len(story.articles) >= 3:
+            
+            supabase.table("stories").upsert({
+                "story_id": story.story_id,
+                "topic": story.topic,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }).execute()
+
             for a in story.articles:
                 # Check if this article is already in the LIVE 'articles' table
                 existing_live = supabase.table("articles").select("id").eq("id", a.id).execute()
